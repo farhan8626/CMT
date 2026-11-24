@@ -1,0 +1,6 @@
+@CMT.API_HostAddress = http://localhost:5177
+
+GET {{CMT.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

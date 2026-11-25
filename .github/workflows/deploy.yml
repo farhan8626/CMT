@@ -21,16 +21,8 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # 3. Restore NuGet packages (with win-x64 runtime so publish --no-restore has net8.0/win-x64)
-      - name: Restore dependencies
-        run: dotnet restore CMT.API/CMT.API.csproj -r win-x64
-
-      # 4. Build solution
-      - name: Build solution
-        run: dotnet build CMT.API/CMT.API.csproj --configuration Release -r win-x64 --no-restore
-
-      # 5. Publish CMT.API
-      #    --self-contained false => relies on .NET runtime installed on server
+      # 3. Publish CMT.API (restores, builds, and publishes win-x64 framework-dependent in one step)
+      #    --self-contained false => relies on .NET runtime installed on MonsterASP IIS
       #    -r win-x64             => target Windows x64 (MonsterASP IIS)
       - name: Publish CMT.API
         run: |
@@ -38,8 +30,7 @@ jobs:
             --configuration Release `
             --runtime win-x64 `
             --self-contained false `
-            --output ./publish `
-            --no-restore
+            --output ./publish
 
       # 6. Inject production appsettings from GitHub Secrets
       #    (keeps secrets out of the repository)

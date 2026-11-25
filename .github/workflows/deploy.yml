@@ -21,13 +21,13 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      # 3. Restore NuGet packages
+      # 3. Restore NuGet packages (with win-x64 runtime so publish --no-restore has net8.0/win-x64)
       - name: Restore dependencies
-        run: dotnet restore CMT.API/CMT.API.csproj
+        run: dotnet restore CMT.API/CMT.API.csproj -r win-x64
 
       # 4. Build solution
       - name: Build solution
-        run: dotnet build CMT.API/CMT.API.csproj --configuration Release --no-restore
+        run: dotnet build CMT.API/CMT.API.csproj --configuration Release -r win-x64 --no-restore
 
       # 5. Publish CMT.API
       #    --self-contained false => relies on .NET runtime installed on server

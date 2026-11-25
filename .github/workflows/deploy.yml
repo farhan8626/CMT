@@ -1,0 +1,96 @@
+name: Deploy CMT Backend to MonsterASP
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    name: Build & Deploy to MonsterASP
+    runs-on: windows-latest
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Setup .NET 8
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # 3. Restore NuGet packages
+      - name: Restore dependencies
+        run: dotnet restore CMT.slnx
+
+      # 4. Build solution
+      - name: Build solution
+        run: dotnet build CMT.slnx --configuration Release --no-restore
+
+      # 5. Publish CMT.API
+      #    --self-contained false => relies on .NET runtime installed on server
+      #    -r win-x64             => target Windows x64 (MonsterASP IIS)
+      - name: Publish CMT.API
+        run: |
+          dotnet publish CMT.API/CMT.API.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained false `
+            --output ./publish `
+            --no-restore
+
+      # 6. Inject production appsettings from GitHub Secrets
+      #    (keeps secrets out of the repository)
+      - name: Write production appsettings
+        shell: pwsh
+        run: |
+          $settings = @{
+            ConnectionStrings = @{
+              DefaultConnection = "${{ secrets.DB_CONNECTION_STRING }}"
+            }
+            JwtSettings = @{
+              SecretKey   = "${{ secrets.JWT_SECRET_KEY }}"
+              Issuer      = "CMT-API"
+              Audience    = "CMT-Client"
+              ExpiryHours = 10
+            }
+            SmtpSettings = @{
+              Host        = "smtp.gmail.com"
+              Port        = 587
+              UseSsl      = $false
+              UseStartTls = $true
+              Username    = "${{ secrets.SMTP_USERNAME }}"
+              Password    = "${{ secrets.SMTP_PASSWORD }}"
+              FromEmail   = "${{ secrets.SMTP_USERNAME }}"
+              FromName    = "CMT Electrical Shop"
+            }
+            QuestPDF = @{
+              LicenseType = "Community"
+            }
+            AllowedOrigins = @("https://centralmachinetools.vercel.app")
+            Logging = @{
+              LogLevel = @{
+                Default                = "Warning"
+                "Microsoft.AspNetCore" = "Warning"
+              }
+            }
+            AllowedHosts = "*"
+          }
+          $settings | ConvertTo-Json -Depth 10 | Set-Content -Path ./publish/appsettings.Production.json -Encoding UTF8
+
+      # 7. FTP deploy to MonsterASP
+      - name: Deploy via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./publish/
+          server-dir: /wwwroot/
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/appsettings.Development.json

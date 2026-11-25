@@ -23,11 +23,11 @@ jobs:
 
       # 3. Restore NuGet packages
       - name: Restore dependencies
-        run: dotnet restore CMT.slnx
+        run: dotnet restore CMT.API/CMT.API.csproj
 
       # 4. Build solution
       - name: Build solution
-        run: dotnet build CMT.slnx --configuration Release --no-restore
+        run: dotnet build CMT.API/CMT.API.csproj --configuration Release --no-restore
 
       # 5. Publish CMT.API
       #    --self-contained false => relies on .NET runtime installed on server

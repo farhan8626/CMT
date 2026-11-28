@@ -168,6 +168,9 @@ app.UseAuthorization();
 // Global error handling middleware
 app.UseMiddleware<CMT.API.Middleware.GlobalExceptionMiddleware>();
 
+app.MapGet("/api/health", () => Results.Ok(new { status = "healthy", utc = DateTime.UtcNow }))
+    .AllowAnonymous();
+
 app.MapControllers();
 
 app.Run();

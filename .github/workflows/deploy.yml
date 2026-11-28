@@ -1,0 +1,108 @@
+name: Deploy CMT Backend to MonsterASP
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    name: Build & Deploy to MonsterASP
+    runs-on: windows-latest
+
+    steps:
+      # 1. Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Setup .NET 8
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # 3. Publish CMT.API (restores, builds, and publishes win-x64 framework-dependent in one step)
+      #    --self-contained false => relies on .NET runtime installed on MonsterASP IIS
+      #    -r win-x64             => target Windows x64 (MonsterASP IIS)
+      - name: Publish CMT.API
+        run: |
+          dotnet publish CMT.API/CMT.API.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained false `
+            --output ./publish
+
+      # 6. Inject production appsettings from GitHub Secrets
+      #    (keeps secrets out of the repository)
+      - name: Write production appsettings
+        shell: pwsh
+        run: |
+          $settings = @{
+            ConnectionStrings = @{
+              DefaultConnection = "${{ secrets.DB_CONNECTION_STRING }}"
+            }
+            JwtSettings = @{
+              SecretKey   = "${{ secrets.JWT_SECRET_KEY }}"
+              Issuer      = "CMT-API"
+              Audience    = "CMT-Client"
+              ExpiryHours = 10
+            }
+            SmtpSettings = @{
+              Host        = "smtp.gmail.com"
+              Port        = 587
+              UseSsl      = $false
+              UseStartTls = $true
+              Username    = "${{ secrets.SMTP_USERNAME }}"
+              Password    = "${{ secrets.SMTP_PASSWORD }}"
+              FromEmail   = "${{ secrets.SMTP_USERNAME }}"
+              FromName    = "CMT Electrical Shop"
+            }
+            QuestPDF = @{
+              LicenseType = "Community"
+            }
+            AllowedOrigins = @("https://centralmachinetools.vercel.app")
+            Logging = @{
+              LogLevel = @{
+                Default                = "Warning"
+                "Microsoft.AspNetCore" = "Warning"
+              }
+            }
+            AllowedHosts = "*"
+          }
+          $settings | ConvertTo-Json -Depth 10 | Set-Content -Path ./publish/appsettings.Production.json -Encoding UTF8
+
+          # Create logs directory placeholder (IIS needs it for stdout logs)
+          New-Item -ItemType Directory -Force -Path ./publish/logs | Out-Null
+          New-Item -ItemType File -Force -Path ./publish/logs/.gitkeep | Out-Null
+
+      # 7. Drop app_offline.htm into /wwwroot/ first to stop IIS and unlock DLLs
+      - name: Take site offline (unlock DLLs)
+        shell: pwsh
+        run: |
+          "<!DOCTYPE html><html><body><h1>CMT is being updated...</h1></body></html>" | Set-Content -Path ./app_offline.htm -Encoding UTF8
+          curl.exe --silent --show-error --fail --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" -T ./app_offline.htm "ftp://${{ secrets.FTP_SERVER }}/wwwroot/app_offline.htm"
+          Start-Sleep -Seconds 5
+
+      # 8. FTP deploy to MonsterASP (/wwwroot/ is the writable website root)
+      - name: Deploy via FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftp
+          local-dir: ./publish/
+          server-dir: /wwwroot/
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/appsettings.Development.json
+
+      # 9. Bring site back online by removing /wwwroot/app_offline.htm
+      - name: Bring site back online
+        if: always()
+        shell: pwsh
+        run: |
+          curl.exe --silent --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" "ftp://${{ secrets.FTP_SERVER }}/" -Q "-DELE /wwwroot/app_offline.htm"
+          exit 0

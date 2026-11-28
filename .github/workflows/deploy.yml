@@ -71,38 +71,38 @@ jobs:
           }
           $settings | ConvertTo-Json -Depth 10 | Set-Content -Path ./publish/appsettings.Production.json -Encoding UTF8
 
-          # Create app_offline.htm to safely stop IIS and unlock DLLs before upload
-          New-Item -ItemType Directory -Force -Path ./offline | Out-Null
-          @"
-<!DOCTYPE html><html><body><h1>CMT is being updated. Please wait...</h1></body></html>
-"@ | Set-Content -Path ./offline/app_offline.htm -Encoding UTF8
-
           # Create logs directory placeholder (IIS needs it for stdout logs)
           New-Item -ItemType Directory -Force -Path ./publish/logs | Out-Null
+          New-Item -ItemType File -Force -Path ./publish/logs/.gitkeep | Out-Null
 
-      # 7. Drop app_offline.htm first to safely unlock CMT.API.dll on IIS
+      # 7. Drop app_offline.htm into /wwwroot/ first to stop IIS and unlock DLLs
       - name: Take site offline (unlock DLLs)
-        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
-        with:
-          server: ${{ secrets.FTP_SERVER }}
-          username: ${{ secrets.FTP_USERNAME }}
-          password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: ./offline/
-          server-dir: /
-          dangerous-clean-slate: false
+        shell: pwsh
+        run: |
+          "<!DOCTYPE html><html><body><h1>CMT is being updated...</h1></body></html>" | Set-Content -Path ./app_offline.htm -Encoding UTF8
+          curl.exe --silent --show-error --fail --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" -T ./app_offline.htm "ftp://${{ secrets.FTP_SERVER }}/wwwroot/app_offline.htm"
+          Start-Sleep -Seconds 5
 
-      # 8. FTP deploy to MonsterASP
-      #    server-dir: / because the FTP root IS already wwwroot (Website root: \wwwroot)
+      # 8. FTP deploy to MonsterASP (/wwwroot/ is the writable website root)
       - name: Deploy via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftp
           local-dir: ./publish/
-          server-dir: /
+          server-dir: /wwwroot/
           dangerous-clean-slate: false
           exclude: |
             **/.git*
             **/.git*/**
             **/appsettings.Development.json
+
+      # 9. Bring site back online by removing /wwwroot/app_offline.htm
+      - name: Bring site back online
+        if: always()
+        shell: pwsh
+        run: |
+          curl.exe --silent --user "${{ secrets.FTP_USERNAME }}:${{ secrets.FTP_PASSWORD }}" "ftp://${{ secrets.FTP_SERVER }}/" -Q "-DELE /wwwroot/app_offline.htm"
+          exit 0

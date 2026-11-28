@@ -71,7 +71,28 @@ jobs:
           }
           $settings | ConvertTo-Json -Depth 10 | Set-Content -Path ./publish/appsettings.Production.json -Encoding UTF8
 
-      # 7. FTP deploy to MonsterASP
+          # Create app_offline.htm to safely stop IIS and unlock DLLs before upload
+          New-Item -ItemType Directory -Force -Path ./offline | Out-Null
+          @"
+<!DOCTYPE html><html><body><h1>CMT is being updated. Please wait...</h1></body></html>
+"@ | Set-Content -Path ./offline/app_offline.htm -Encoding UTF8
+
+          # Create logs directory placeholder (IIS needs it for stdout logs)
+          New-Item -ItemType Directory -Force -Path ./publish/logs | Out-Null
+
+      # 7. Drop app_offline.htm first to safely unlock CMT.API.dll on IIS
+      - name: Take site offline (unlock DLLs)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./offline/
+          server-dir: /
+          dangerous-clean-slate: false
+
+      # 8. FTP deploy to MonsterASP
+      #    server-dir: / because the FTP root IS already wwwroot (Website root: \wwwroot)
       - name: Deploy via FTP
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -79,7 +100,7 @@ jobs:
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: ./publish/
-          server-dir: /wwwroot/
+          server-dir: /
           dangerous-clean-slate: false
           exclude: |
             **/.git*
